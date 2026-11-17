@@ -30,7 +30,8 @@ three console-only launches are usable, and to the house baseline
 The spread s_h is the weighted standard deviation of the lr_h values,
 floored at 0.25 log units and at the house baseline's 0.15*sqrt(h-1),
 so the 5%-95% band stays honest even when the few nearest launches
-happen to agree.  Everything is computed from the case file at run
+happen to agree; the floor widens when the kernel weights concentrate
+on fewer than three effective launches.  Everything is computed from the case file at run
 time: no network, no stored data, no randomness, so two runs on the
 same case write the same bytes.
 
@@ -181,7 +182,18 @@ def forecast_case(case: dict) -> dict:
         total_w = sum(w for _v, w in pairs)
         mean = sum(v * w for v, w in pairs) / total_w
         var = sum(w * (v - mean) ** 2 for v, w in pairs) / total_w
-        sigma = max(SIGMA_FLOOR, BASE_SIGMA * math.sqrt(h - 1), math.sqrt(var))
+        # Effective sample size of the kernel weights: when the case's
+        # first hour sits far from every comparable (a launch bigger
+        # than any the pool has seen), the weights concentrate on one
+        # or two launches and the spread above would understate the
+        # uncertainty, so the floor widens as the effective sample
+        # thins below three launches.
+        ess = total_w * total_w / sum(w * w for _v, w in pairs)
+        sigma = max(
+            SIGMA_FLOOR * math.sqrt(MIN_POOL / max(ess, 1.0)),
+            BASE_SIGMA * math.sqrt(h - 1),
+            math.sqrt(var),
+        )
         quantiles: list[float | int] = []
         for z in Z:
             q = p1 * math.exp(mean + z * sigma)
